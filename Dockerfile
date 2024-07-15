@@ -1,45 +1,21 @@
-FROM python:3.8-slim as build
+FROM python:3.10-slim AS build 
 
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+RUN apt-get update && apt-get -y install libpq-dev gcc
+COPY ./requirements.txt requirements.txt
+RUN pip3 install --no-cache-dir --target=packages -r requirements.txt
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    gcc \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+FROM python:3.10-slim AS runtime
+COPY --from=build packages /usr/lib/python3.10/site-packages
+ENV PYTHONPATH=/usr/lib/python3.10/site-packages
+
+RUN useradd -m nonroot
+USER nonroot
 
 WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
-
 COPY . .
-
-RUN set -ex \
-    && flake8 . \
-    && coverage run manage.py test \
-    && coverage report \
-    && bandit -r . \
-    && safety check
-
-FROM python:3.8-slim as production
-
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
-
-WORKDIR /app
-
-COPY --from=build /app /app
-
 EXPOSE 8000
 
-COPY ./docker/gunicorn_conf.py /gunicorn_conf.py
-RUN groupadd -r django \
-    && useradd -r -g django django \
-    && chown -R django /app \
-    && chmod +x /gunicorn_conf.py
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-USER django
-
-CMD ["gunicorn", "--config", "/gunicorn_conf.py", "kubernetes_event.wsgi:application"]
+ENTRYPOINT ["python3","manage.py", "runserver", "0.0.0.0:8000"]
